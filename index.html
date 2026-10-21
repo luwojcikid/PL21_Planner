@@ -1,0 +1,738 @@
+
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel priorytetów załadunków</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+:root {
+  --navy:#14283f;
+  --blue:#2563eb;
+  --bg:#f3f6fb;
+  --border:#dce4ef;
+  --green:#16845c;
+  --orange:#d18a12;
+  --red:#d34c51;
+}
+* {box-sizing:border-box}
+body {
+  margin:0;
+  font-family:Segoe UI,Arial,sans-serif;
+  background:var(--bg);
+  color:#203047;
+}
+header {
+  background:var(--navy);
+  color:white;
+  padding:26px 5%;
+}
+header h1 {margin:0 0 7px;font-size:27px}
+header p {margin:0;color:#cbd5e1}
+main {max-width:1450px;margin:auto;padding:24px}
+.panel {
+  background:white;
+  padding:23px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  margin-bottom:20px;
+  box-shadow:0 3px 12px #20304708;
+}
+h2 {margin:0 0 17px;font-size:20px}
+button {
+  border:0;
+  border-radius:8px;
+  padding:11px 16px;
+  cursor:pointer;
+  background:var(--blue);
+  color:white;
+  font-weight:600;
+}
+button:hover {filter:brightness(.93)}
+button:disabled {opacity:.5;cursor:not-allowed}
+button.secondary {background:var(--navy)}
+button.danger {background:#c83e48}
+button.small {padding:8px 12px}
+input,select {
+  border:1px solid #cbd5e1;
+  border-radius:8px;
+  padding:10px;
+  font-size:14px;
+}
+input[type=time] {min-width:125px}
+input[type=text] {width:120px}
+input[type=file] {max-width:100%}
+.controls {
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  align-items:center;
+  margin-top:15px;
+}
+.upload {
+  padding:25px;
+  border:2px dashed #9bb5d6;
+  background:#f8fbff;
+  text-align:center;
+  border-radius:12px;
+}
+.note {
+  font-size:13px;
+  color:#64748b;
+  line-height:1.6;
+}
+.table-wrap {overflow-x:auto}
+table {width:100%;border-collapse:collapse;font-size:14px}
+th,td {
+  padding:12px;
+  border-bottom:1px solid #e5eaf1;
+  text-align:left;
+}
+th {background:#eaf0f8}
+tr:hover td {background:#f8fbff}
+.cards {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:15px;
+  margin-bottom:20px;
+}
+.card {
+  background:white;
+  padding:20px;
+  border:1px solid var(--border);
+  border-top:5px solid var(--blue);
+  border-radius:12px;
+}
+.card strong {
+  display:block;
+  font-size:34px;
+  margin:10px 0;
+}
+.card small {color:#64748b}
+.tag {
+  display:inline-block;
+  padding:5px 11px;
+  border-radius:20px;
+  font-weight:700;
+  background:#e7efff;
+  color:#2456ac;
+}
+.tag.none {background:#e9edf2;color:#586678}
+.bar {
+  display:flex;
+  height:27px;
+  overflow:hidden;
+  border-radius:8px;
+  background:#e5e7eb;
+}
+.bar div {min-width:0}
+#status,#configStatus {
+  margin-top:12px;
+  font-weight:600;
+}
+#results[hidden] {display:none}
+#dataTableWrap {max-height:560px;overflow:auto}
+#dataTableWrap th {position:sticky;top:0;z-index:1}
+@media(max-width:700px) {
+  main {padding:12px}
+  .panel {padding:15px}
+}
+</style>
+</head>
+
+<body>
+<header>
+  <h1>Panel priorytetów załadunków</h1>
+  <p>Konfiguracja godzin • Analiza Excel • Eksport danych</p>
+</header>
+
+<main>
+
+<section class="panel">
+  <h2>1. Konfiguracja priorytetów godzinowych</h2>
+  <p class="note">
+    Możesz zmieniać godziny, nazwy priorytetów
+    oraz dodawać nowe przedziały.
+    Granice godzinowe są wliczane do przedziału.
+  </p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Priorytet</th>
+          <th>Godzina od</th>
+          <th>Godzina do</th>
+          <th>Akcja</th>
+        </tr>
+      </thead>
+      <tbody id="priorityRows"></tbody>
+    </table>
+  </div>
+
+  <div class="controls">
+    <button id="addPriority">+ Dodaj priorytet</button>
+    <button id="applyPriority" class="secondary">
+      Zastosuj godziny
+    </button>
+    <button id="resetPriority" class="danger">
+      Przywróć domyślne
+    </button>
+  </div>
+
+  <div id="configStatus" role="status"></div>
+  <p class="note">
+    Ustawienia są zapisywane lokalnie w przeglądarce.
+    Przedziały nie mogą się nakładać.
+  </p>
+</section>
+
+<section class="panel">
+  <h2>2. Wczytaj plik Excel</h2>
+
+  <div class="upload">
+    <p><strong>Wybierz plik Excel</strong></p>
+    <input type="file" id="file" accept=".xlsx,.xls,.xlsm">
+    <p class="note">
+      A – ID | D – adres | P – godzina |
+      AB – automatycznie przypisany priorytet
+    </p>
+  </div>
+
+  <div class="controls">
+    <button id="download" disabled>
+      Pobierz Excel z priorytetami
+    </button>
+    <button id="downloadCSV" class="secondary" disabled>
+      Pobierz podsumowanie CSV
+    </button>
+  </div>
+
+  <div id="status" role="status"></div>
+</section>
+
+<section id="results" hidden>
+
+  <div id="cards" class="cards"></div>
+
+  <section class="panel">
+    <h2>3. Podsumowanie priorytetów</h2>
+    <div id="bar" class="bar"></div>
+    <p id="total" class="note"></p>
+  </section>
+
+  <section class="panel">
+    <h2>4. Szczegółowa lista załadunków</h2>
+
+    <div class="controls">
+      <select id="filter">
+        <option value="ALL">Wszystkie priorytety</option>
+      </select>
+      <input type="search" id="search"
+             placeholder="Szukaj ID lub adresu..."
+             style="min-width:240px">
+      <span id="shown" class="note"></span>
+    </div>
+
+    <div id="dataTableWrap" style="margin-top:18px">
+      <table>
+        <thead>
+          <tr>
+            <th>Lp.</th>
+            <th>OrderId</th>
+            <th>Adres</th>
+            <th>Godzina</th>
+            <th>Priorytet</th>
+          </tr>
+        </thead>
+        <tbody id="dataRows"></tbody>
+      </table>
+    </div>
+  </section>
+</section>
+
+</main>
+
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+
+const STORAGE_KEY = "logistyka_priorytety_v2";
+
+const defaults = [
+  {name:"PRIO A", from:"01:00", to:"11:00"},
+  {name:"PRIO B", from:"11:01", to:"15:00"},
+  {name:"PRIO C", from:"15:01", to:"23:00"}
+];
+
+let priorities = structuredClone(defaults);
+let workbook = null;
+let sheet = null;
+let records = [];
+let fileName = "";
+
+const colors = [
+  "#16845c","#d18a12","#d34c51",
+  "#2563eb","#9333ea","#0891b2",
+  "#be185d","#64748b"
+];
+
+function escapeHTML(value) {
+  return String(value ?? "").replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",
+    '"':"&quot;","'":"&#39;"
+  })[c]);
+}
+
+function toMinutes(t) {
+  if (!/^\d{2}:\d{2}$/.test(t)) return null;
+  const [h,m] = t.split(":").map(Number);
+  if (h > 23 || m > 59) return null;
+  return h*60+m;
+}
+
+function fromMinutes(m) {
+  return String(Math.floor(m/60)).padStart(2,"0")
+    + ":" + String(m%60).padStart(2,"0");
+}
+
+function loadSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (Array.isArray(saved) && saved.length) {
+      const valid = validatePriorities(saved);
+      if (!valid) priorities = saved;
+    }
+  } catch(e) {
+    console.warn("Nie można odczytać ustawień.",e);
+  }
+}
+
+function renderPriorityEditor() {
+  $("priorityRows").innerHTML = priorities.map((p,i) => `
+    <tr>
+      <td>
+        <input type="text" data-index="${i}"
+          data-field="name"
+          value="${escapeHTML(p.name)}">
+      </td>
+      <td>
+        <input type="time" data-index="${i}"
+          data-field="from"
+          value="${escapeHTML(p.from)}">
+      </td>
+      <td>
+        <input type="time" data-index="${i}"
+          data-field="to"
+          value="${escapeHTML(p.to)}">
+      </td>
+      <td>
+        <button class="danger small"
+          data-remove="${i}">Usuń</button>
+      </td>
+    </tr>
+  `).join("");
+}
+
+function readEditor() {
+  const rows = [...$("priorityRows").querySelectorAll("tr")];
+  return rows.map(row => ({
+    name:row.querySelector('[data-field="name"]').value.trim(),
+    from:row.querySelector('[data-field="from"]').value,
+    to:row.querySelector('[data-field="to"]').value
+  }));
+}
+
+function validatePriorities(items) {
+  if (!items.length) return "Dodaj przynajmniej jeden priorytet.";
+
+  const names = new Set();
+  const ranges = [];
+
+  for (const p of items) {
+    if (!p.name || !p.name.trim()) {
+      return "Każdy priorytet musi mieć nazwę.";
+    }
+
+    const key = p.name.trim().toUpperCase();
+    if (names.has(key)) {
+      return "Nazwy priorytetów nie mogą się powtarzać.";
+    }
+    names.add(key);
+
+    const start = toMinutes(p.from);
+    const end = toMinutes(p.to);
+
+    if (start === null || end === null) {
+      return "Uzupełnij poprawnie wszystkie godziny.";
+    }
+    if (start > end) {
+      return "Godzina rozpoczęcia nie może być późniejsza od zakończenia.";
+    }
+
+    ranges.push({start,end,name:p.name});
+  }
+
+  ranges.sort((a,b) => a.start-b.start);
+
+  for (let i=1;i<ranges.length;i++) {
+    if (ranges[i].start <= ranges[i-1].end) {
+      return "Nakładające się godziny: " +
+        ranges[i-1].name + " oraz " + ranges[i].name;
+    }
+  }
+  return null;
+}
+
+function applyPriorities() {
+  const edited = readEditor();
+  const error = validatePriorities(edited);
+
+  if (error) {
+    $("configStatus").textContent = "Błąd: " + error;
+    $("configStatus").style.color = "#c83e48";
+    return false;
+  }
+
+  priorities = edited;
+  try {
+    localStorage.setItem(STORAGE_KEY,JSON.stringify(priorities));
+  } catch(e) {
+    console.warn("Ustawienia nie zostały zapisane.",e);
+  }
+
+  $("configStatus").textContent =
+    "Zapisano konfigurację. Priorytety zostały zaktualizowane.";
+  $("configStatus").style.color = "#16845c";
+
+  if (workbook) recalculate();
+
+  renderFilter();
+  return true;
+}
+
+$("addPriority").addEventListener("click",() => {
+  const edited = readEditor();
+  const used = new Set(edited.map(p => p.name.toUpperCase()));
+  let n = 65;
+  while (used.has("PRIO " + String.fromCharCode(n)) && n <= 90) n++;
+
+  edited.push({
+    name:n <= 90 ? "PRIO " + String.fromCharCode(n) : "NOWY PRIO",
+    from:"23:01",
+    to:"23:59"
+  });
+
+  priorities = edited;
+  renderPriorityEditor();
+  $("configStatus").textContent =
+    "Nowy priorytet dodany. Ustaw godziny i kliknij Zastosuj.";
+});
+
+$("priorityRows").addEventListener("click",e => {
+  const btn = e.target.closest("[data-remove]");
+  if (!btn) return;
+  priorities = readEditor();
+  priorities.splice(Number(btn.dataset.remove),1);
+  renderPriorityEditor();
+  $("configStatus").textContent =
+    "Priorytet usunięty z edytora. Kliknij Zastosuj godziny.";
+});
+
+$("applyPriority").addEventListener("click",applyPriorities);
+
+$("resetPriority").addEventListener("click",() => {
+  priorities = structuredClone(defaults);
+  renderPriorityEditor();
+  applyPriorities();
+});
+
+function excelMinutes(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (Number.isInteger(value) && value >= 0 && value <= 23) {
+      return value*60;
+    }
+    if (value >= 0) {
+      return Math.round((value%1)*1440)%1440;
+    }
+    return null;
+  }
+
+  if (value instanceof Date && !isNaN(value)) {
+    return value.getHours()*60+value.getMinutes();
+  }
+
+  const text = String(value).trim();
+
+  const match = text.match(/^(\d{1,2})[:.](\d{2})(?::\d{2})?$/);
+  if (match) {
+    const h = Number(match[1]);
+    const m = Number(match[2]);
+    if (h < 24 && m < 60) return h*60+m;
+  }
+
+  if (/^\d{1,2}$/.test(text)) {
+    const h = Number(text);
+    if (h < 24) return h*60;
+  }
+
+  const embedded = text.match(/(?:^|\s)(\d{1,2}):(\d{2})(?::\d{2})?/);
+  if (embedded) {
+    const h = Number(embedded[1]);
+    const m = Number(embedded[2]);
+    if (h < 24 && m < 60) return h*60+m;
+  }
+
+  return null;
+}
+
+function priorityFor(value) {
+  const m = excelMinutes(value);
+  if (m === null) return "Bez priorytetu";
+
+  for (const p of priorities) {
+    if (m >= toMinutes(p.from) && m <= toMinutes(p.to)) {
+      return p.name;
+    }
+  }
+  return "Bez priorytetu";
+}
+
+function formatExcelTime(value) {
+  const m = excelMinutes(value);
+  return m === null ? String(value ?? "") : fromMinutes(m);
+}
+
+function getCell(row,col) {
+  return sheet[XLSX.utils.encode_cell({r:row,c:col})];
+}
+
+function cellValue(row,col) {
+  return getCell(row,col)?.v ?? "";
+}
+
+function cellDisplay(row,col) {
+  const c = getCell(row,col);
+  return c ? String(c.w ?? c.v ?? "") : "";
+}
+
+function recalculate() {
+  if (!sheet) return;
+
+  const range = XLSX.utils.decode_range(sheet["!ref"]);
+  records = [];
+
+  for (let r=range.s.r+1;r<=range.e.r;r++) {
+    const id = cellDisplay(r,1);
+    const address = cellDisplay(r,3);
+    const rawTime = cellValue(r,15);
+
+    if (!id && !address && (rawTime === "" || rawTime === null)) {
+      continue;
+    }
+
+    const priority = priorityFor(rawTime);
+
+    records.push({
+      row:r,
+      id,
+      address,
+      time:formatExcelTime(rawTime),
+      priority
+    });
+
+    const addressAB = XLSX.utils.encode_cell({r,c:27});
+    sheet[addressAB] = {t:"s",v:priority};
+  }
+
+  const header = XLSX.utils.encode_cell({
+    r:range.s.r,c:27
+  });
+  sheet[header] = {t:"s",v:"Priorytet"};
+
+  range.e.c = Math.max(range.e.c,27);
+  sheet["!ref"] = XLSX.utils.encode_range(range);
+
+  renderFilter();
+  renderSummary();
+  renderTable();
+}
+
+$("file").addEventListener("change",async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  $("download").disabled = true;
+  $("downloadCSV").disabled = true;
+  $("results").hidden = true;
+  $("status").textContent = "Wczytywanie pliku...";
+
+  try {
+    if (typeof XLSX === "undefined") {
+      throw new Error("Biblioteka Excel nie została załadowana.");
+    }
+
+    // Zastosuj aktualną konfigurację przed analizą.
+    if (!applyPriorities()) {
+      throw new Error("Popraw konfigurację priorytetów.");
+    }
+
+    fileName = file.name;
+    const buffer = await file.arrayBuffer();
+
+    workbook = XLSX.read(buffer,{
+      type:"array",
+      cellDates:false,
+      cellStyles:true
+    });
+
+    sheet = workbook.Sheets[workbook.SheetNames[0]];
+    if (!sheet || !sheet["!ref"]) {
+      throw new Error("Pierwszy arkusz jest pusty.");
+    }
+
+    recalculate();
+
+    $("results").hidden = false;
+    $("download").disabled = false;
+    $("downloadCSV").disabled = false;
+    $("status").textContent =
+      "Gotowe! Przeanalizowano " + records.length + " wierszy.";
+
+  } catch(error) {
+    console.error(error);
+    $("status").textContent = "Błąd: " + error.message;
+  }
+});
+
+function renderFilter() {
+  const previous = $("filter").value;
+  const options = [
+    {value:"ALL",label:"Wszystkie priorytety"},
+    ...priorities.map(p => ({value:p.name,label:p.name})),
+    {value:"Bez priorytetu",label:"Bez priorytetu"}
+  ];
+
+  $("filter").innerHTML = options.map(p =>
+    `<option value="${escapeHTML(p.value)}">${escapeHTML(p.label)}</option>`
+  ).join("");
+
+  if (options.some(o => o.value === previous)) {
+    $("filter").value = previous;
+  }
+}
+
+function renderSummary() {
+  const items = [
+    ...priorities.map((p,i) => ({
+      name:p.name,
+      description:p.from+" – "+p.to,
+      color:colors[i%colors.length]
+    })),
+    {
+      name:"Bez priorytetu",
+      description:"Poza zakresami lub brak godziny",
+      color:"#94a3b8"
+    }
+  ];
+
+  const total = records.length;
+
+  $("cards").innerHTML = items.map(item => {
+    const count = records.filter(r => r.priority === item.name).length;
+    return `
+      <div class="card" style="border-top-color:${item.color}">
+        <h3>${escapeHTML(item.name)}</h3>
+        <strong>${count}</strong>
+        <small>${escapeHTML(item.description)}</small>
+      </div>
+    `;
+  }).join("");
+
+  $("bar").innerHTML = items.map(item => {
+    const count = records.filter(r => r.priority === item.name).length;
+    const width = total ? count/total*100 : 0;
+    return `<div title="${escapeHTML(item.name)}: ${count}"
+      style="width:${width}%;background:${item.color}"></div>`;
+  }).join("");
+
+  $("total").textContent = "Łącznie przeanalizowano: " + total + " wierszy.";
+}
+
+function renderTable() {
+  const filter = $("filter").value;
+  const query = $("search").value.toLowerCase().trim();
+
+  const filtered = records.filter(r =>
+    (filter === "ALL" || r.priority === filter) &&
+    (!query ||
+      r.id.toLowerCase().includes(query) ||
+      r.address.toLowerCase().includes(query))
+  );
+
+  $("shown").textContent = "Wyświetlono: " + filtered.length;
+
+  $("dataRows").innerHTML = filtered.map((r,i) => `
+    <tr>
+      <td>${i+1}</td>
+      <td>${escapeHTML(r.id)}</td>
+      <td>${escapeHTML(r.address)}</td>
+      <td>${escapeHTML(r.time)}</td>
+      <td><span class="tag ${r.priority === "Bez priorytetu" ? "none" : ""}">
+        ${escapeHTML(r.priority)}
+      </span></td>
+    </tr>
+  `).join("");
+}
+
+$("filter").addEventListener("change",renderTable);
+$("search").addEventListener("input",renderTable);
+
+$("download").addEventListener("click",() => {
+  if (!workbook) return;
+
+  const base = fileName.replace(/\.(xlsx|xls|xlsm)$/i,"");
+
+  XLSX.writeFile(workbook,base+"_PRIORYTETY.xlsx",{
+    bookType:"xlsx",
+    compression:true
+  });
+});
+
+$("downloadCSV").addEventListener("click",() => {
+  const rows = [
+    ["ID","Adres","Godzina","Priorytet"],
+    ...records.map(r => [r.id,r.address,r.time,r.priority])
+  ];
+
+  const content = "\uFEFF"+rows.map(row =>
+    row.map(value =>
+      '"'+String(value??"").replace(/"/g,'""')+'"'
+    ).join(";")
+  ).join("\r\n");
+
+  const blob = new Blob([content],{
+    type:"text/csv;charset=utf-8"
+  });
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "Podsumowanie_priorytetow.csv";
+  link.click();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+});
+
+loadSettings();
+renderPriorityEditor();
+renderFilter();
+</script>
+</body>
+</html>
