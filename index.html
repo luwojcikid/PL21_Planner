@@ -192,8 +192,8 @@ tr:hover td {background:#f8fbff}
       <table>
         <thead>
           <tr>
-            <th>Lp.</th><th>OrderId</th><th>Adres</th>
-            <th>Godzina</th><th>Priorytet (AB)</th>
+            <th>Lp.</th><th>OrderId (kolB)</th><th>Adres (kolD)</th>
+            <th>Godzina (kolP)</th><th>Priorytet (AB)</th>
             <th>JAROSTY (AC)</th>
           </tr>
         </thead>
@@ -449,11 +449,7 @@ function recalculate() {
     const rawTime = cellValue(r,15);
     const codeAA = cellValue(r,26);
 
-    if (!String(id).trim()) {
-
-  delete sheet[XLSX.utils.encode_cell({r,c:27})]; // AB
-  delete sheet[XLSX.utils.encode_cell({r,c:28})]; // AC
-
+    if (!id && !address && rawTime === "" && codeAA === "") {
   continue;
 }
 
