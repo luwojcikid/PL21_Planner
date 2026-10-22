@@ -449,8 +449,13 @@ function recalculate() {
     const rawTime = cellValue(r,15);
     const codeAA = cellValue(r,26);
 
-    if (!id && !address && rawTime === "" && codeAA === "")
-      continue;
+    if (!String(id).trim()) {
+
+  delete sheet[XLSX.utils.encode_cell({r,c:27})]; // AB
+  delete sheet[XLSX.utils.encode_cell({r,c:28})]; // AC
+
+  continue;
+}
 
     const priority = priorityFor(rawTime);
     const jarosty = isJarosty(codeAA);
