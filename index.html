@@ -16,6 +16,7 @@
   --green:#16845c;
   --orange:#d18a12;
   --red:#d34c51;
+  --yellow:#fff0a6;
 }
 * {box-sizing:border-box}
 body {
@@ -120,6 +121,14 @@ tr:hover td {background:#f8fbff}
   color:#2456ac;
 }
 .tag.none {background:#e9edf2;color:#586678}
+.tag.jarosty {
+  background:#facc15;
+  color:#713f12;
+}
+#dataRows tr.jarosty-row td,
+#dataRows tr.jarosty-row:hover td {
+  background:var(--yellow) !important;
+}
 .bar {
   display:flex;
   height:27px;
@@ -196,8 +205,13 @@ tr:hover td {background:#f8fbff}
     <p><strong>Wybierz plik Excel</strong></p>
     <input type="file" id="file" accept=".xlsx,.xls,.xlsm">
     <p class="note">
-      A – ID | D – adres | P – godzina |
-      AB – automatycznie przypisany priorytet
+      B – OrderId | D – adres | P – godzina |
+      AA – kod | AB – automatycznie przypisany priorytet
+    </p>
+    <p class="note">
+      <strong>Warunek specjalny:</strong>
+      AA = 3808 → JAROSTY (kolor żółty).
+      Ten warunek ma pierwszeństwo przed godziną.
     </p>
   </div>
 
@@ -231,8 +245,8 @@ tr:hover td {background:#f8fbff}
         <option value="ALL">Wszystkie priorytety</option>
       </select>
       <input type="search" id="search"
-             placeholder="Szukaj ID lub adresu..."
-             style="min-width:240px">
+        placeholder="Szukaj ID lub adresu..."
+        style="min-width:240px">
       <span id="shown" class="note"></span>
     </div>
 
@@ -259,8 +273,9 @@ tr:hover td {background:#f8fbff}
 "use strict";
 
 const $ = id => document.getElementById(id);
-
 const STORAGE_KEY = "logistyka_priorytety_v2";
+const JAROSTY_CODE = "3808";
+const JAROSTY_NAME = "JAROSTY";
 
 const defaults = [
   {name:"PRIO A", from:"01:00", to:"11:00"},
@@ -268,7 +283,7 @@ const defaults = [
   {name:"PRIO C", from:"15:01", to:"23:00"}
 ];
 
-let priorities = structuredClone(defaults);
+let priorities = defaults.map(p => ({...p}));
 let workbook = null;
 let sheet = null;
 let records = [];
@@ -303,8 +318,7 @@ function loadSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     if (Array.isArray(saved) && saved.length) {
-      const valid = validatePriorities(saved);
-      if (!valid) priorities = saved;
+      if (!validatePriorities(saved)) priorities = saved;
     }
   } catch(e) {
     console.warn("Nie można odczytać ustawień.",e);
@@ -358,6 +372,9 @@ function validatePriorities(items) {
     }
 
     const key = p.name.trim().toUpperCase();
+    if (key === JAROSTY_NAME || key === "BEZ PRIORYTETU") {
+      return "Nazwa " + p.name + " jest zarezerwowana.";
+    }
     if (names.has(key)) {
       return "Nazwy priorytetów nie mogą się powtarzać.";
     }
@@ -372,7 +389,6 @@ function validatePriorities(items) {
     if (start > end) {
       return "Godzina rozpoczęcia nie może być późniejsza od zakończenia.";
     }
-
     ranges.push({start,end,name:p.name});
   }
 
@@ -409,7 +425,6 @@ function applyPriorities() {
   $("configStatus").style.color = "#16845c";
 
   if (workbook) recalculate();
-
   renderFilter();
   return true;
 }
@@ -445,7 +460,7 @@ $("priorityRows").addEventListener("click",e => {
 $("applyPriority").addEventListener("click",applyPriorities);
 
 $("resetPriority").addEventListener("click",() => {
-  priorities = structuredClone(defaults);
+  priorities = defaults.map(p => ({...p}));
   renderPriorityEditor();
   applyPriorities();
 });
@@ -523,6 +538,11 @@ function cellDisplay(row,col) {
   return c ? String(c.w ?? c.v ?? "") : "";
 }
 
+// NOWY WARUNEK: kolumna AA = 3808
+function isJarosty(value) {
+  return String(value ?? "").trim() === JAROSTY_CODE;
+}
+
 function recalculate() {
   if (!sheet) return;
 
@@ -530,24 +550,33 @@ function recalculate() {
   records = [];
 
   for (let r=range.s.r+1;r<=range.e.r;r++) {
-    const id = cellDisplay(r,1);
-    const address = cellDisplay(r,3);
-    const rawTime = cellValue(r,15);
+    const id = cellDisplay(r,1);       // B
+    const address = cellDisplay(r,3);  // D
+    const rawTime = cellValue(r,15);   // P
+    const codeAA = cellValue(r,26);    // AA
 
-    if (!id && !address && (rawTime === "" || rawTime === null)) {
+    if (!id && !address &&
+        (rawTime === "" || rawTime === null) &&
+        (codeAA === "" || codeAA === null)) {
       continue;
     }
 
-    const priority = priorityFor(rawTime);
+    // JAROSTY ma pierwszeństwo przed godziną.
+    const jarosty = isJarosty(codeAA);
+    const priority = jarosty
+      ? JAROSTY_NAME
+      : priorityFor(rawTime);
 
     records.push({
       row:r,
       id,
       address,
       time:formatExcelTime(rawTime),
-      priority
+      priority,
+      jarosty
     });
 
+    // Wpisz priorytet do kolumny AB.
     const addressAB = XLSX.utils.encode_cell({r,c:27});
     sheet[addressAB] = {t:"s",v:priority};
   }
@@ -579,7 +608,6 @@ $("file").addEventListener("change",async e => {
       throw new Error("Biblioteka Excel nie została załadowana.");
     }
 
-    // Zastosuj aktualną konfigurację przed analizą.
     if (!applyPriorities()) {
       throw new Error("Popraw konfigurację priorytetów.");
     }
@@ -603,11 +631,18 @@ $("file").addEventListener("change",async e => {
     $("results").hidden = false;
     $("download").disabled = false;
     $("downloadCSV").disabled = false;
+
+    const jarostyCount = records.filter(r => r.jarosty).length;
+
     $("status").textContent =
-      "Gotowe! Przeanalizowano " + records.length + " wierszy.";
+      "Gotowe! Przeanalizowano " + records.length +
+      " wierszy. JAROSTY: " + jarostyCount + ".";
 
   } catch(error) {
     console.error(error);
+    workbook = null;
+    sheet = null;
+    records = [];
     $("status").textContent = "Błąd: " + error.message;
   }
 });
@@ -617,6 +652,7 @@ function renderFilter() {
   const options = [
     {value:"ALL",label:"Wszystkie priorytety"},
     ...priorities.map(p => ({value:p.name,label:p.name})),
+    {value:JAROSTY_NAME,label:JAROSTY_NAME},
     {value:"Bez priorytetu",label:"Bez priorytetu"}
   ];
 
@@ -636,6 +672,11 @@ function renderSummary() {
       description:p.from+" – "+p.to,
       color:colors[i%colors.length]
     })),
+    {
+      name:JAROSTY_NAME,
+      description:"Kod 3808 w kolumnie AA",
+      color:"#eab308"
+    },
     {
       name:"Bez priorytetu",
       description:"Poza zakresami lub brak godziny",
@@ -663,7 +704,8 @@ function renderSummary() {
       style="width:${width}%;background:${item.color}"></div>`;
   }).join("");
 
-  $("total").textContent = "Łącznie przeanalizowano: " + total + " wierszy.";
+  $("total").textContent =
+    "Łącznie przeanalizowano: " + total + " wierszy.";
 }
 
 function renderTable() {
@@ -680,14 +722,19 @@ function renderTable() {
   $("shown").textContent = "Wyświetlono: " + filtered.length;
 
   $("dataRows").innerHTML = filtered.map((r,i) => `
-    <tr>
+    <tr class="${r.jarosty ? 'jarosty-row' : ''}">
       <td>${i+1}</td>
       <td>${escapeHTML(r.id)}</td>
       <td>${escapeHTML(r.address)}</td>
       <td>${escapeHTML(r.time)}</td>
-      <td><span class="tag ${r.priority === "Bez priorytetu" ? "none" : ""}">
-        ${escapeHTML(r.priority)}
-      </span></td>
+      <td>
+        <span class="tag ${
+          r.jarosty ? "jarosty" :
+          r.priority === "Bez priorytetu" ? "none" : ""
+        }">
+          ${escapeHTML(r.priority)}
+        </span>
+      </td>
     </tr>
   `).join("");
 }
@@ -695,10 +742,53 @@ function renderTable() {
 $("filter").addEventListener("change",renderTable);
 $("search").addEventListener("input",renderTable);
 
+// Eksport Excel.
+// SheetJS Community nie zapisuje niezawodnie kolorów komórek.
+// Dlatego dodajemy osobny arkusz z wyróżnieniem JAROSTY
+// przez czytelny opis i dane do filtrowania.
 $("download").addEventListener("click",() => {
   if (!workbook) return;
 
   const base = fileName.replace(/\.(xlsx|xls|xlsm)$/i,"");
+
+  // Osobny arkusz ułatwiający przegląd priorytetów.
+  const summaryRows = [
+    ["OrderId","Adres","Godzina","Priorytet","Kod AA"],
+    ...records.map(r => [
+      r.id,
+      r.address,
+      r.time,
+      r.priority,
+      r.jarosty ? JAROSTY_CODE : ""
+    ])
+  ];
+
+  const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
+
+  summarySheet["!cols"] = [
+    {wch:24},
+    {wch:42},
+    {wch:14},
+    {wch:20},
+    {wch:14}
+  ];
+
+  summarySheet["!autofilter"] = {
+    ref:"A1:E" + summaryRows.length
+  };
+
+  const summaryName = "Podglad priorytetow";
+
+  // Usuń poprzednią wersję arkusza, jeśli istnieje.
+  if (workbook.Sheets[summaryName]) {
+    delete workbook.Sheets[summaryName];
+    workbook.SheetNames = workbook.SheetNames.filter(
+      name => name !== summaryName
+    );
+  }
+
+  workbook.Sheets[summaryName] = summarySheet;
+  workbook.SheetNames.push(summaryName);
 
   XLSX.writeFile(workbook,base+"_PRIORYTETY.xlsx",{
     bookType:"xlsx",
